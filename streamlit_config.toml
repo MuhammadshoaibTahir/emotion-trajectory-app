@@ -1,0 +1,25 @@
+[server]
+# Ensures app works on Streamlit Cloud, HuggingFace & Heroku
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+port = 8501
+
+[theme]
+# A modern dark UI
+primaryColor = "#4F8CFF"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1A1C23"
+textColor = "#FFFFFF"
+font = "sans serif"
+
+[browser]
+# Tab title and favicon
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[client]
+# Wide layout for better 3D plots and tables
+toolbarMode = "minimal"
+showErrorDetails = true
