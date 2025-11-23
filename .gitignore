@@ -1,0 +1,73 @@
+# ===========================================================
+# PYTHON
+# ===========================================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# PyCharm
+.idea/
+*.iml
+
+# VSCode
+.vscode/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# ===========================================================
+# STREAMLIT
+# ===========================================================
+# Streamlit cache
+.streamlit/
+
+# Streamlit static temporary files
+**/.streamlit/assets/
+
+# ===========================================================
+# TRANSFORMERS / MACHINE LEARNING
+# ===========================================================
+# Model cache directories
+huggingface/
+.cache/
+transformers/
+
+# HuggingFace datasets cache
+datasets/
+
+# Large downloaded models
+*.bin
+*.pt
+*.pth
+
+# ===========================================================
+# OS / Misc
+# ===========================================================
+.DS_Store
+Thumbs.db
+
+# ===========================================================
+# ENVIRONMENT CONFIG
+# ===========================================================
+# Do NOT upload private keys
+*.env
+.env.*
+secrets.json
+
+# Tokenizers temporary data
+tokenizer.json
