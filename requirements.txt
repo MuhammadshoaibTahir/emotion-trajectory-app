@@ -1,1 +1,10 @@
-
+streamlit>=1.20
+transformers>=4.30
+torch
+nltk
+plotly
+pandas
+numpy
+scipy
+scikit-learn  # optional - only if you need it for other things; not required by this code
+whisper @ git+https://github.com/openai/whisper.git  # optional; remove if not using whisper
