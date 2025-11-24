@@ -1,61 +1,68 @@
-# app.py
+# test.py
 """
-Emotion Trajectory Studio — Single-file complete app
-- 3D animated trajectory (Plotly)
-- Readable sentence highlighting with mini-bars & expanders
-- Word-level heatmap (optional)
-- Transition Sankey + matrix
-- Keyword extraction (no sklearn)
-- Cohesion / stability metrics
-- Export: JSON, CSV, HTML
-- Optional Whisper transcription and zero-shot topic classification
-- Batched inference for speed
-- Robust safety for indexing, DataFrame insertion, and names
-- Updated for modern Streamlit API (st.rerun(), width='stretch')
+Emotion Trajectory Studio — Unified Single-file Streamlit app
+- Sentence-level 6-class emotion detection
+- 2D animated emotion curves + controls
+- 3D animated Valence × Arousal × Sentence trajectory
+- Word-level emotion heatmap
+- Transition matrix + Sankey
+- Keyword extraction (TF×IDF-like)
+- Cohesion & stability metrics
+- Extra visualizations: radar profile, emotion rhythm, polarity waterfall
+- Optional: Whisper transcription (opt-in), Zero-shot topic classification (opt-in)
+- Robust handling for Streamlit Cloud (NLTK local data fallback)
+- Exports: JSON, CSV, HTML
 """
-
 # ---------------------------
-# Imports & Configuration
+# Imports & configuration
 # ---------------------------
-import streamlit as st
-st.set_page_config(layout="wide", page_title="Emotion Trajectory Studio", initial_sidebar_state="expanded")
-
 import os
 import io
 import json
 import math
-import time
 import datetime
 from tempfile import NamedTemporaryFile
 from typing import List, Dict, Tuple, Optional
 from collections import Counter, defaultdict
+
+import streamlit as st
+st.set_page_config(page_title="Emotion Trajectory Studio", layout="wide", initial_sidebar_state="expanded")
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.io as pio
 import nltk
-import os
 
-# Ensure NLTK punkt is available in cloud environment
-nltk_data_path = os.path.join(os.path.dirname(__file__), "nltk_data")
-if not os.path.exists(nltk_data_path):
-    os.makedirs(nltk_data_path)
-
-nltk.data.path.append(nltk_data_path)
-
-# Try to load Punkt tokenizer; if missing, load from local folder
+# NLTK local data setup (important for Streamlit Cloud — include nltk_data in repo)
 try:
-    nltk.data.find("tokenizers/punkt")
-except LookupError:
-    nltk.download("punkt", download_dir=nltk_data_path)
+    # compute local path relative to file if possible
+    base_dir = os.path.dirname(__file__) if "__file__" in globals() else os.getcwd()
+except Exception:
+    base_dir = os.getcwd()
+nltk_local = os.path.join(base_dir, "nltk_data")
+if not os.path.exists(nltk_local):
+    try:
+        os.makedirs(nltk_local, exist_ok=True)
+    except Exception:
+        pass
+if nltk_local not in nltk.data.path:
+    nltk.data.path.append(nltk_local)
 
-# NLTK tokenizers
-import nltk
-nltk.download("punkt", quiet=True)
+# Try to ensure punkt and punkt_tab exist; if not, attempt download to local dir (may fail on Cloud)
+for _res in ("tokenizers/punkt", "tokenizers/punkt_tab"):
+    try:
+        nltk.data.find(_res)
+    except LookupError:
+        try:
+            nltk.download(_res.split("/")[-1], download_dir=nltk_local)
+        except Exception:
+            # If download fails (common on Streamlit Cloud), user must upload nltk_data in repo.
+            pass
+
 from nltk.tokenize import sent_tokenize, word_tokenize
 
-# Transformers / torch (lazy checked below)
+# Transformers & torch (optional; heavy). We'll guard usage.
 try:
     import torch
     from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
@@ -70,7 +77,7 @@ try:
 except Exception:
     WHISPER_AVAILABLE = False
 
-# SciPy optional (savgol and entropy)
+# SciPy optional (for savgol & entropy)
 try:
     from scipy.signal import savgol_filter
     import scipy.stats as stats
@@ -90,34 +97,33 @@ except Exception:
 MODEL_NAME = "bhadresh-savani/distilbert-base-uncased-emotion"
 EMOTION_LABELS = ["anger", "fear", "joy", "love", "sadness", "surprise"]
 
-# Heuristic mapping valence [-1..1], arousal [0..1]
 VALENCE_AROUSAL = {
-    "anger":    (-0.6, 0.9),
-    "fear":     (-0.8, 0.85),
-    "joy":      (0.8, 0.6),
-    "love":     (0.9, 0.5),
-    "sadness":  (-0.9, 0.3),
+    "anger": (-0.6, 0.9),
+    "fear": (-0.8, 0.85),
+    "joy": (0.8, 0.6),
+    "love": (0.9, 0.5),
+    "sadness": (-0.9, 0.3),
     "surprise": (0.0, 0.95)
 }
 
-# UI colors (soft pastel)
+# UI colors
 EMOTION_COLORS = {
-    "anger":    "#ffd6d6",
-    "fear":     "#e6e6ff",
-    "joy":      "#fff8d6",
-    "love":     "#ffe6f2",
-    "sadness":  "#e8f0ff",
+    "anger": "#ffd6d6",
+    "fear": "#e6e6ff",
+    "joy": "#fff8d6",
+    "love": "#ffe6f2",
+    "sadness": "#e8f0ff",
     "surprise": "#eaffeb",
-    None:       "#f6f6f6"
+    None: "#f6f6f6"
 }
 EMOTION_BORDER = {
-    "anger":    "#ff9b9b",
-    "fear":     "#bdbdff",
-    "joy":      "#ffeaa3",
-    "love":     "#ffb3db",
-    "sadness":  "#c7dbff",
+    "anger": "#ff9b9b",
+    "fear": "#bdbdff",
+    "joy": "#ffeaa3",
+    "love": "#ffb3db",
+    "sadness": "#c7dbff",
     "surprise": "#bff0c2",
-    None:       "#dddddd"
+    None: "#dddddd"
 }
 EMOTION_TEXT_COLOR = "#222222"
 
@@ -129,15 +135,7 @@ DEVICE = torch.device("cuda" if (TORCH_AVAILABLE and torch.cuda.is_available()) 
 def _escape_html(text: str) -> str:
     if text is None:
         return ""
-    return (str(text)
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br/>"))
-
-def ensure_length_alignment(list_a: List, list_b: List) -> Tuple[List, List]:
-    m = min(len(list_a), len(list_b))
-    return list_a[:m], list_b[:m]
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>"))
 
 def safe_insert_sentence_column(df: pd.DataFrame, sentences: List[str], dominants: List[Optional[str]]) -> pd.DataFrame:
     """Insert 'sentence' and 'dominant' safely into df, aligning lengths."""
@@ -165,6 +163,10 @@ def safe_insert_sentence_column(df: pd.DataFrame, sentences: List[str], dominant
         df["dominant"] = dominants
     return df
 
+def ensure_length_alignment(list_a: List, list_b: List) -> Tuple[List, List]:
+    m = min(len(list_a), len(list_b))
+    return list_a[:m], list_b[:m]
+
 # ---------------------------
 # Smoothing & numeric tools
 # ---------------------------
@@ -188,7 +190,7 @@ def smooth_series(arr: np.ndarray, window: int = 3, method: str = "mean") -> np.
     return np.convolve(arr, kernel, mode='same')
 
 # ---------------------------
-# Keyword extraction (no sklearn)
+# Keywords (TF×IDF-like) without sklearn
 # ---------------------------
 def extract_keywords_tfidf_like(text: str, top_k: int = 15, ngram_range: Tuple[int,int] = (1,2), stopwords: Optional[set] = None) -> List[Tuple[str,float]]:
     if not text or not text.strip():
@@ -282,7 +284,6 @@ def sentence_detail_html(index: int, sentence: str, probs: Optional[List[float]]
         for lab, p in zip(labels, probs):
             pct = int(max(0, min(100, round(p * 100))))
             color = EMOTION_BORDER.get(lab, "#aaaaaa")
-            # row with label, bar, value
             rows.append(
                 f"<div style='display:flex;align-items:center;margin-bottom:6px;'>"
                 f"<div style='width:80px;font-size:13px;color:{EMOTION_TEXT_COLOR};'>{lab}</div>"
@@ -552,10 +553,49 @@ def build_gauge(valence: np.ndarray) -> Tuple[go.Figure, float]:
     fig.update_layout(height=260)
     return fig, mean_v
 
+def build_radar_profile(sent_scores: np.ndarray, labels: List[str]) -> go.Figure:
+    if not getattr(sent_scores, "size", 0):
+        fig = go.Figure(); fig.update_layout(title="Emotion Radar (no data)"); return fig
+    avg = np.nanmean(sent_scores, axis=0).tolist()
+    r = avg + [avg[0]]
+    theta = labels + [labels[0]]
+    fig = go.Figure(go.Scatterpolar(r=r, theta=theta, fill='toself', name='Average emotion profile'))
+    fig.update_layout(title="Average Emotion Radar", polar=dict(radialaxis=dict(visible=True, range=[0,1])))
+    return fig
+
+def build_emotion_rhythm(sent_scores: np.ndarray) -> go.Figure:
+    # Show a stack area showing relative dominance over time
+    if not getattr(sent_scores, "size", 0):
+        fig = go.Figure(); fig.update_layout(title="Emotion Rhythm (no data)"); return fig
+    x = list(range(sent_scores.shape[0]))
+    fig = go.Figure()
+    for i, lab in enumerate(EMOTION_LABELS):
+        fig.add_trace(go.Scatter(x=x, y=sent_scores[:,i], mode='lines', stackgroup='one', name=lab))
+    fig.update_layout(title="Emotion Rhythm (stacked)", xaxis_title="Sentence", yaxis_title="Probability", height=360)
+    return fig
+
+def build_polarity_waterfall(sent_scores: np.ndarray) -> go.Figure:
+    # compute polarity per sentence (valence weighted)
+    if not getattr(sent_scores, "size", 0):
+        fig = go.Figure(); fig.update_layout(title="Polarity Waterfall (no data)"); return fig
+    v, _ = compute_valence_arousal_from_probs(sent_scores)
+    deltas = v
+    x = [f"Sent {i+1}" for i in range(len(deltas))]
+    base = 0
+    measures = []
+    for d in deltas:
+        measures.append(d)
+    # Use bar chart with cumulative
+    cum = np.cumsum(measures)
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=x, y=measures, name='Polarity (valence)'))
+    fig.update_layout(title="Polarity Waterfall (Valence per sentence)", xaxis_tickangle=45, height=360)
+    return fig
+
 # ---------------------------
 # UI: Sidebar & Inputs
 # ---------------------------
-st.title("🎛️ Emotion Trajectory Studio — Complete Edition")
+st.title("🎛️ Emotion Trajectory Studio — Upgraded")
 
 with st.sidebar:
     st.header("Settings & Extras")
@@ -563,10 +603,10 @@ with st.sidebar:
     smoothing_method = st.selectbox("Smoothing method", options=(["mean","savgol"] if SG_AVAILABLE else ["mean"]), index=0)
     smoothing_window = st.slider("Smoothing window (sentences)", min_value=1, max_value=11, value=3)
     compute_word_heatmap = st.checkbox("Compute word-level heatmap (slower)", value=True)
-    max_word_count = st.number_input("Max words for heatmap", min_value=20, max_value=3000, value=300, step=20)
+    max_word_count = st.number_input("Max words to analyze for heatmap", min_value=20, max_value=3000, value=300, step=20)
     batch_size = st.number_input("Inference batch size", min_value=8, max_value=256, value=32, step=8)
-    animate_2d = st.checkbox("Animated 2D curves", value=True)
-    animate_3d = st.checkbox("Animated 3D trajectory", value=True)
+    animate_2d = st.checkbox("Enable animated 2D curves", value=True)
+    animate_3d = st.checkbox("Enable animated 3D trajectory", value=True)
     include_word_in_json = st.checkbox("Include word-level scores in JSON export", value=False)
     top_k = st.slider("Top-K emotions per sentence (table)", min_value=1, max_value=len(EMOTION_LABELS), value=2)
     st.markdown("---")
@@ -584,74 +624,71 @@ with st.sidebar:
         st.rerun()
 
 # Input area
-col_left, col_right = st.columns([1, 2])
-with col_left:
+col1, col2 = st.columns([1, 2])
+with col1:
     st.header("Input")
-    input_mode = st.radio("Input type:", ["Text", "Upload Audio"])
+    input_mode = st.radio("Input mode:", ["Text", "Upload Audio"])
     text_input = ""
     uploaded_audio = None
     if input_mode == "Text":
-        default_text = st.session_state.get("sample_text", "")
-        text_input = st.text_area("Paste or write your text here:", value=default_text, height=260)
+        text_input = st.text_area("Paste your text here (or write):", value=st.session_state.get("sample_text", ""), height=220)
     else:
-        uploaded_audio = st.file_uploader("Upload audio file (wav/mp3/m4a/ogg)", type=["wav","mp3","m4a","ogg"])
-        whisper_model_choice = st.selectbox("Whisper model size", options=["tiny", "base", "small", "medium", "large"], index=2)
+        uploaded_audio = st.file_uploader("Upload audio (wav/mp3/m4a/ogg)", type=["wav", "mp3", "m4a", "ogg"])
+        whisper_model_choice = st.selectbox("Whisper model (if installed):", ["tiny","base","small","medium","large"], index=2)
+        st.checkbox("Auto-transcribe audio (requires 'whisper' installed)", value=WHISPER_AVAILABLE, key="auto_transcribe")
 
-with col_right:
-    st.header("Quick Notes")
-    st.info("This app predicts 6 emotions per sentence and builds trajectories in valence/arousal space.")
-    st.write("For long documents, increase batch size and smoothing window for nicer curves.")
+with col2:
+    st.header("Quick Notes & Tips")
+    st.info("This app predicts 6 emotions per sentence and visualizes trajectories in valence/arousal space.")
+    st.write("For long documents, increase batch size and smoothing window for smoother curves.")
     if use_whisper and not WHISPER_AVAILABLE:
-        st.warning("Whisper not installed. Disable Whisper or install it to enable transcription.")
+        st.warning("Whisper not found. Install it if you want automatic transcription.")
 
-# ---------------------------
-# Action: Run Analysis
-# ---------------------------
+# Run analysis
 if st.button("Run Analysis"):
-    # Prepare text (handle audio)
+    # handle audio transcription if needed
     if input_mode == "Text":
         text = text_input
     else:
         if uploaded_audio is None:
-            st.error("Please upload audio or switch to Text mode.")
+            st.error("Please upload an audio file or switch to Text mode.")
             st.stop()
         if use_whisper:
             if not WHISPER_AVAILABLE:
-                st.error("Whisper not installed in environment.")
+                st.error("Whisper not installed.")
                 st.stop()
             with st.spinner("Transcribing audio with Whisper..."):
                 try:
                     text = whisper_transcribe_file(uploaded_audio, model_size=whisper_model_choice)
                     st.success("Transcription complete.")
-                    st.text_area("Transcribed text (editable):", value=text, height=200)
+                    st.text_area("Transcribed text (editable):", value=text, height=180)
                 except Exception as e:
-                    st.error(f"Whisper transcription failed: {e}")
+                    st.error(f"Whisper transcription failed: {e}. Please paste text manually.")
                     st.stop()
         else:
-            st.error("Whisper disabled. Please transcribe audio externally or switch to Text input.")
+            st.error("Automatic transcription not available. Please paste text manually in Text mode.")
             st.stop()
 
     if not text or len(text.strip()) < 3:
-        st.error("Please provide at least a few words of text.")
+        st.error("Please provide some text to analyze.")
         st.stop()
 
-    # Ensure torch available
     if not TORCH_AVAILABLE:
-        st.error("Torch/Transformers are not installed. Install them to run analysis.")
+        st.error("Transformers/Torch not installed in this environment.")
         st.stop()
-    # Load model
-    with st.spinner("Loading tokenizer and model..."):
+
+    # load model
+    with st.spinner("Loading model..."):
         tokenizer, model = load_emotion_model()
 
-    # Optional zero-shot pipeline
     zsp = None
     if use_zero_shot:
         with st.spinner("Loading zero-shot pipeline..."):
             zsp = load_zero_shot_model()
             if zsp is None:
-                st.warning("Zero-shot pipeline failed to load. Continuing without it.")
+                st.warning("Zero-shot failed to load. Continuing without it.")
 
-    # Progress bar
+    # progress bar facility
     p = st.progress(0.0)
     def progress_cb(pct):
         try:
@@ -659,8 +696,8 @@ if st.button("Run Analysis"):
         except Exception:
             pass
 
-    # Build trajectory
-    with st.spinner("Analyzing text..."):
+    # analyze
+    with st.spinner("Analyzing text — this may take a while for long documents..."):
         traj = build_trajectory(text, tokenizer, model,
                                 word_heatmap=compute_word_heatmap,
                                 word_limit=int(max_word_count),
@@ -670,7 +707,7 @@ if st.button("Run Analysis"):
                                 progress_callback=progress_cb)
     p.empty()
 
-    # Unpack
+    # unpack and safety align
     sentences = traj["sentences"]
     sent_scores = traj["sentence_scores"]
     dominants = traj["dominant"]
@@ -679,7 +716,6 @@ if st.button("Run Analysis"):
     valence = traj["valence"]
     arousal = traj["arousal"]
 
-    # Align lengths (safety)
     if getattr(sent_scores, "size", 0) and sent_scores.shape[0] != len(sentences):
         st.warning("Aligning sentences and score lengths.")
         m = min(sent_scores.shape[0], len(sentences))
@@ -689,10 +725,9 @@ if st.button("Run Analysis"):
         valence = valence[:m]
         arousal = arousal[:m]
 
-    # Build DataFrame safely
     df_sent = safe_insert_sentence_column(pd.DataFrame(sent_scores, columns=EMOTION_LABELS) if getattr(sent_scores, "size", 0) else pd.DataFrame(), sentences, dominants)
 
-    # Exports
+    # export JSON
     export_json = {
         "text": text,
         "sentences": [
@@ -705,11 +740,10 @@ if st.button("Run Analysis"):
         export_json["word_tokens"] = word_tokens
         export_json["word_scores"] = (word_scores.tolist() if getattr(word_scores, "size", 0) else [])
 
-    # Keywords & cohesion
     keywords = extract_keywords_tfidf_like(text, top_k=25)
     cohesion = cohesion_and_stability(valence, dominants)
 
-    # Visuals
+    # visuals
     try:
         sankey_fig, transition_matrix, matrix_fig = build_sankey_and_matrix(dominants)
     except Exception:
@@ -719,8 +753,11 @@ if st.button("Run Analysis"):
     fig2d = build_2d_animated(sent_scores, EMOTION_LABELS) if (getattr(sent_scores, "size", 0) and animate_2d) else None
     fig3d = build_3d_animated(valence, arousal, dominants) if animate_3d else None
     heatmap_fig = build_heatmap(word_tokens, word_scores, EMOTION_LABELS, max_words_display=200) if (compute_word_heatmap and len(word_tokens)) else None
+    radar_fig = build_radar_profile(sent_scores, EMOTION_LABELS)
+    rhythm_fig = build_emotion_rhythm(sent_scores)
+    waterfall_fig = build_polarity_waterfall(sent_scores)
 
-    # Zero-shot classification
+    # zero-shot
     z_result = None
     if zsp is not None:
         try:
@@ -729,7 +766,7 @@ if st.button("Run Analysis"):
         except Exception as e:
             st.warning(f"Zero-shot failed: {e}")
 
-    # Save to session and rerun to show results area
+    # session store and rerun to display results
     st.session_state["_last_analysis"] = {
         "text": text,
         "sentences": sentences,
@@ -749,6 +786,9 @@ if st.button("Run Analysis"):
         "fig2d": fig2d,
         "fig3d": fig3d,
         "heatmap_fig": heatmap_fig,
+        "radar_fig": radar_fig,
+        "rhythm_fig": rhythm_fig,
+        "waterfall_fig": waterfall_fig,
         "zero_shot": z_result
     }
     st.rerun()
@@ -776,109 +816,108 @@ if "_last_analysis" in st.session_state:
     fig2d = res["fig2d"]
     fig3d = res["fig3d"]
     heatmap_fig = res["heatmap_fig"]
+    radar_fig = res["radar_fig"]
+    rhythm_fig = res["rhythm_fig"]
+    waterfall_fig = res["waterfall_fig"]
     z_result = res.get("zero_shot", None)
 
-    st.header("Analysis Results")
+    st.header("Analysis Results — Visual Dashboard")
 
-    colA, colB, colC = st.columns([2,2,1])
-    with colA:
-        st.subheader("3D Trajectory — Valence × Arousal × Sentence")
-        if fig3d:
-            st.plotly_chart(fig3d, width="stretch")
+    tabs = st.tabs(["Overview", "Visuals", "Table & Highlights", "Exports & Topics"])
+    with tabs[0]:
+        st.subheader("Summary")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Sentences", len(sentences))
+        c2.metric("Avg Valence", f"{float(np.nanmean(valence)) if getattr(valence, 'size', 0) else 0.0:.3f}")
+        c3.metric("Stability", f"{cohesion.get('stability_score',0.0):.3f}")
+        c4.metric("Top emotion", Counter([d for d in dominants if d is not None]).most_common(1)[0][0] if any(d is not None for d in dominants) else "N/A")
+        st.markdown("**Explanation:** The dashboard shows sentence-by-sentence emotion probabilities (6 classes). Valence/arousal are heuristic projections used to visualize emotional flow. Stability measures how consistent the emotional arc is (lower variance + lower entropy -> higher stability).")
+
+        st.subheader("Radar: average profile")
+        st.plotly_chart(radar_fig, width="stretch")
+
+        st.subheader("Emotion rhythm (stacked)")
+        st.plotly_chart(rhythm_fig, width="stretch")
+
+    with tabs[1]:
+        leftc, midc, rightc = st.columns([1.6, 1.2, 1])
+        with leftc:
+            st.subheader("3D Trajectory")
+            if fig3d:
+                st.plotly_chart(fig3d, width="stretch")
+            else:
+                st.info("3D trajectory not available")
+            st.subheader("Valence × Arousal scatter")
+            va_fig = go.Figure()
+            va_fig.add_trace(go.Scatter(x=valence if getattr(valence,'size',0) else [], y=arousal if getattr(arousal,'size',0) else [], mode='markers+lines', name='sentences', marker=dict(size=6)))
+            for lab in EMOTION_LABELS:
+                v,a = VALENCE_AROUSAL[lab]
+                va_fig.add_trace(go.Scatter(x=[v], y=[a], mode='markers+text', text=[lab], textposition='top center', marker=dict(size=12)))
+            va_fig.update_layout(title="Valence × Arousal — sentences & centroids", height=420)
+            st.plotly_chart(va_fig, width="stretch")
+
+        with midc:
+            st.subheader("2D Emotion curves")
+            if fig2d:
+                st.plotly_chart(fig2d, width="stretch")
+            else:
+                st.info("2D curves not available")
+
+            st.subheader("Polarity Waterfall")
+            st.plotly_chart(waterfall_fig, width="stretch")
+
+        with rightc:
+            st.subheader("Transitions & Metrics")
+            st.plotly_chart(matrix_fig, width="stretch")
+            st.plotly_chart(sankey_fig, width="stretch")
+            st.metric("Average Valence", f"{float(np.nanmean(valence)) if getattr(valence,'size',0) else 0.0:.3f}")
+            st.metric("Stability Score", f"{cohesion.get('stability_score', 0.0):.3f}")
+            st.plotly_chart(gauge_fig, width="stretch")
+
+    with tabs[2]:
+        st.subheader("Sentence Highlights")
+        if sentences:
+            render_sentence_highlights(sentences, dominants, probs=sent_scores if getattr(sent_scores, "size", 0) else None, show_confidence=True, include_mini_bar=True)
         else:
-            st.info("3D trajectory not generated.")
-
-        st.subheader("Valence × Arousal Scatter")
-        va_fig = go.Figure()
-        va_fig.add_trace(go.Scatter(x=valence if getattr(valence, "size", 0) else [], y=arousal if getattr(arousal, "size", 0) else [], mode='markers+lines', name='sentences', marker=dict(size=6)))
-        for lab in EMOTION_LABELS:
-            v,a = VALENCE_AROUSAL[lab]
-            va_fig.add_trace(go.Scatter(x=[v], y=[a], mode='markers+text', text=[lab], textposition='top center', marker=dict(size=12)))
-        va_fig.update_layout(title="Valence × Arousal — sentences & centroids", height=480)
-        st.plotly_chart(va_fig, width="stretch")
-
-        st.subheader("Animated Emotion Curves (2D)")
-        if fig2d:
-            st.plotly_chart(fig2d, width="stretch")
-        else:
-            st.info("2D curves not generated or not enough data.")
-
-    with colB:
-        st.subheader("Word-level Emotion Heatmap")
-        if heatmap_fig:
-            st.plotly_chart(heatmap_fig, width="stretch")
-        else:
-            st.info("Word-level heatmap not available.")
-
-        st.subheader("Transition Visualizations")
-        st.plotly_chart(matrix_fig, width="stretch")
-        st.plotly_chart(sankey_fig, width="stretch")
-
-    with colC:
-        st.subheader("Summary & Metrics")
-        st.metric("Average Valence", f"{float(np.nanmean(valence)) if getattr(valence, 'size', 0) else 0.0:.3f}")
-        st.metric("Stability Score", f"{cohesion.get('stability_score', 0.0):.3f}")
-        st.write("Valence variance:", f"{cohesion.get('valence_variance', 0.0):.4f}")
-        st.write("Dominant entropy:", f"{cohesion.get('dominant_entropy', 0.0):.4f}")
-        st.plotly_chart(gauge_fig, width="stretch")
-
-    st.markdown("---")
-    st.subheader("Sentence Highlights (Readable Colors & Details)")
-    if sentences:
-        render_sentence_highlights(sentences, dominants, probs=sent_scores if getattr(sent_scores, "size", 0) else None, show_confidence=True, include_mini_bar=True)
-    else:
-        st.info("No sentences to display.")
-
-    st.markdown("---")
-    st.subheader("Top Keywords (TF×IDF-like)")
-    if keywords:
-        for term, score in keywords:
-            st.write(f"- **{term}** — {score:.3f}")
-    else:
-        st.info("No keywords extracted.")
-
-    st.markdown("---")
-    st.subheader("Sentence-level table")
-    if not df_sent.empty:
-        def topk_str(row):
-            arr = np.array([row[lab] for lab in EMOTION_LABELS], dtype=float)
-            idx = np.argsort(arr)[::-1][:top_k]
-            return ", ".join([f"{EMOTION_LABELS[i]}({arr[i]:.2f})" for i in idx])
-        try:
-            df_sent["top_k"] = df_sent.apply(topk_str, axis=1)
-        except Exception:
-            pass
-        st.dataframe(df_sent, width="stretch")
-    else:
-        st.info("Sentence table is empty (text too short).")
-
-    if z_result:
+            st.info("No sentences to display.")
         st.markdown("---")
-        st.subheader("Zero-shot Topic Classification")
-        st.write(z_result)
+        st.subheader("Sentence Table")
+        if not df_sent.empty:
+            def topk_str(row):
+                arr = np.array([row[lab] for lab in EMOTION_LABELS], dtype=float)
+                idx = np.argsort(arr)[::-1][:top_k]
+                return ", ".join([f"{EMOTION_LABELS[i]}({arr[i]:.2f})" for i in idx])
+            try:
+                df_sent["top_k"] = df_sent.apply(topk_str, axis=1)
+            except Exception:
+                pass
+            st.dataframe(df_sent, width="stretch")
+        else:
+            st.info("Sentence-level table is empty (text too short).")
+
+    with tabs[3]:
+        st.subheader("Exports & Sharing")
+        st.download_button("Download JSON export", data=json.dumps(export_json, indent=2).encode("utf-8"), file_name="emotion_export.json", mime="application/json")
+        try:
+            csv_bytes = df_sent.to_csv(index=False).encode("utf-8")
+        except Exception:
+            csv_bytes = ("sentence,dominant\n" + "\n".join([f"\"{s}\",{d}" for s,d in zip(sentences, dominants)])).encode("utf-8")
+        st.download_button("Download CSV (sentence-level)", data=csv_bytes, file_name="sentence_level_emotions.csv", mime="text/csv")
+        html_report = create_html_report("Emotion Trajectory Report", text, {"3D": fig3d if fig3d else go.Figure(), "VA": va_fig}, {"Sentence table": df_sent}, {"cohesion": cohesion, "model": MODEL_NAME})
+        st.download_button("Download HTML report", data=html_report.encode("utf-8"), file_name="emotion_report.html", mime="text/html")
+        st.markdown("---")
+        st.subheader("Top Keywords")
+        if keywords:
+            for term, score in keywords:
+                st.write(f"- **{term}** — {score:.3f}")
+        else:
+            st.info("No keywords extracted.")
+        if z_result:
+            st.markdown("---")
+            st.subheader("Zero-shot Topic Classification")
+            st.write(z_result)
 
     st.markdown("---")
-    st.header("Export / Download")
-    st.download_button("Download JSON export", data=json.dumps(export_json, indent=2).encode("utf-8"), file_name="emotion_export.json", mime="application/json")
-    try:
-        csv_bytes = df_sent.to_csv(index=False).encode("utf-8")
-    except Exception:
-        csv_bytes = ("sentence,dominant\n" + "\n".join([f"\"{s}\",{d}" for s,d in zip(sentences, dominants)])).encode("utf-8")
-    st.download_button("Download CSV (sentence-level)", data=csv_bytes, file_name="sentence_level_emotions.csv", mime="text/csv")
+    st.info("Finished analysis. Tips: increase batch size for long documents, and disable word-level heatmap for speed.")
 
-    figs = {}
-    if fig3d: figs["3D Trajectory"] = fig3d
-    if fig2d: figs["Emotion curves"] = fig2d
-    figs["Valence-Arousal"] = va_fig
-    if heatmap_fig: figs["Word heatmap"] = heatmap_fig
-    figs["Transition Sankey"] = sankey_fig
-    figs["Transition Matrix"] = matrix_fig
-    tables = {"Sentence table": df_sent}
-    metadata = {"cohesion": cohesion, "model": MODEL_NAME, "generated_at": datetime.datetime.utcnow().isoformat()}
-    html_report = create_html_report("Emotion Trajectory Report", text, figs, tables, metadata)
-    st.download_button("Download full HTML report", data=html_report.encode("utf-8"), file_name="emotion_report.html", mime="text/html")
-
-    st.markdown("---")
-    st.info("Finished analysis. Tips: increase batch size for long documents and disable word-level heatmap for speed.")
-
-# End of app.py
+# End of file
