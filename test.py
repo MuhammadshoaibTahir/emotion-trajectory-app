@@ -34,6 +34,21 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.io as pio
+import nltk
+import os
+
+# Ensure NLTK punkt is available in cloud environment
+nltk_data_path = os.path.join(os.path.dirname(__file__), "nltk_data")
+if not os.path.exists(nltk_data_path):
+    os.makedirs(nltk_data_path)
+
+nltk.data.path.append(nltk_data_path)
+
+# Try to load Punkt tokenizer; if missing, load from local folder
+try:
+    nltk.data.find("tokenizers/punkt")
+except LookupError:
+    nltk.download("punkt", download_dir=nltk_data_path)
 
 # NLTK tokenizers
 import nltk
