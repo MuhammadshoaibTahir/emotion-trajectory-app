@@ -27,6 +27,10 @@ from collections import Counter, defaultdict
 
 import streamlit as st
 st.set_page_config(page_title="Emotion Trajectory Studio", layout="wide", initial_sidebar_state="expanded")
+st.markdown(
+    "<h4 style='text-align:center; color:gray;'>Created by YOUR NAME</h4>",
+    unsafe_allow_html=True
+)
 
 import numpy as np
 import pandas as pd
