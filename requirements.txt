@@ -1,9 +1,21 @@
-streamlit>=1.20
-transformers>=4.30
-torch
-nltk
-plotly
-pandas
-numpy
-scipy
-scikit-learn
+streamlit>=1.31.0
+plotly>=5.18.0
+pandas>=2.1.0
+numpy>=1.26.0
+
+# NLP + Emotion Model
+transformers>=4.36.0
+torch>=2.0.0
+nltk>=3.8.1
+
+# For smoothing + entropy
+scipy>=1.11.0
+
+# Audio transcription (optional)
+git+https://github.com/openai/whisper.git
+
+# Optional: to prevent tokenizer fast-tokenizers errors
+sentencepiece>=0.1.99
+
+# Ensure clean model caching
+huggingface_hub>=0.19.4
