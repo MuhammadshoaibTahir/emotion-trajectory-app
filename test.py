@@ -709,7 +709,7 @@ def build_polarity_waterfall(sent_scores: np.ndarray) -> go.Figure:
 # ---------------------------
 # UI: Sidebar & Inputs
 # ---------------------------
-st.title("🎛️ Emotion Trajectory Studio — GoEmotions (28-class) — No Zero-Shot")
+st.title("Emotion Trajectory Studio - LingXsenti")
 
 with st.sidebar:
     st.header("Settings & Extras")
