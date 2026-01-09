@@ -1,35 +1,48 @@
 # test.py
 """
-Emotion Trajectory Studio — Restaurant Owner Decision Support System
-Author:
+Restaurant Feedback Improvement System
+Developed by:
 - Muhammad Shoaib Tahir (COMSATS University Islamabad)
 - Prof. Haroon Nasser Abdullah Alsager (Prince Sattam Bin Abdulaziz University)
 
 Purpose:
-- Analyze customer feedback (text or files)
-- Detect emotions
-- Identify service problems
-- Provide actionable improvement recommendations
+Turn customer feedback into clear, actionable service improvements
 """
 
-# ---------------------------
+# ===============================
 # Imports
-# ---------------------------
-import os
+# ===============================
 import json
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 from collections import Counter
+
 import nltk
 from nltk.tokenize import sent_tokenize
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# ---------------------------
-# Streamlit config
-# ---------------------------
+# ===============================
+# NLTK FIX (STREAMLIT CLOUD SAFE)
+# ===============================
+def ensure_nltk():
+    try:
+        nltk.data.find("tokenizers/punkt")
+    except LookupError:
+        nltk.download("punkt")
+
+    try:
+        nltk.data.find("tokenizers/punkt_tab")
+    except LookupError:
+        nltk.download("punkt_tab")
+
+ensure_nltk()
+
+# ===============================
+# Streamlit Config
+# ===============================
 st.set_page_config(
     page_title="Restaurant Feedback Improvement System",
     layout="wide"
@@ -37,12 +50,12 @@ st.set_page_config(
 
 st.title("🍽️ Restaurant Feedback Improvement System")
 st.caption(
-    "Turn customer feedback into clear service improvement actions"
+    "Transform customer feedback into actionable service improvements"
 )
 
-# ---------------------------
-# Model config
-# ---------------------------
+# ===============================
+# Model Loading
+# ===============================
 MODEL_NAME = "joeddav/distilbert-base-uncased-go-emotions-student"
 
 @st.cache_resource
@@ -50,65 +63,73 @@ def load_model():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
     model.eval()
-    return tokenizer, model, model.config.id2label
+    labels = list(model.config.id2label.values())
+    return tokenizer, model, labels
 
-tokenizer, model, ID2LABEL = load_model()
-EMOTIONS = list(ID2LABEL.values())
+tokenizer, model, EMOTION_LABELS = load_model()
 
-# ---------------------------
-# SERVICE ISSUE RULE ENGINE
-# ---------------------------
+# ===============================
+# Restaurant Locations (MAP FIX)
+# ===============================
+RESTAURANTS = pd.DataFrame({
+    "restaurant": ["Marsool", "Talabat", "HungerStation"],
+    "lat": [24.7136, 21.4858, 26.4207],   # Riyadh, Jeddah, Dammam
+    "lon": [46.6753, 39.1925, 50.0888]
+})
+
+# ===============================
+# Service Issue Rules
+# ===============================
 SERVICE_RULES = {
-    "food_quality": {
+    "Food Quality": {
         "keywords": ["cold", "taste", "quality", "fresh", "stale", "burnt", "raw"],
-        "action": "Improve food quality, taste consistency, and temperature control."
+        "action": "Improve food quality, freshness, taste consistency, and packaging."
     },
-    "delivery": {
-        "keywords": ["late", "delay", "slow", "time", "delivery"],
+    "Delivery": {
+        "keywords": ["late", "delay", "slow", "delivery", "time"],
         "action": "Improve delivery speed, rider coordination, and order tracking."
     },
-    "staff_behavior": {
+    "Staff Behavior": {
         "keywords": ["rude", "staff", "behavior", "attitude"],
         "action": "Train staff on customer handling and professional behavior."
     },
-    "hygiene": {
+    "Hygiene": {
         "keywords": ["dirty", "hygiene", "clean", "smell"],
         "action": "Improve cleanliness, hygiene standards, and kitchen sanitation."
     },
-    "seating": {
+    "Seating": {
         "keywords": ["seat", "sitting", "crowded", "space"],
-        "action": "Improve seating comfort, space management, and dining environment."
+        "action": "Improve seating comfort, spacing, and dining environment."
     },
-    "pricing": {
+    "Pricing": {
         "keywords": ["price", "expensive", "cheap", "cost"],
         "action": "Review pricing strategy and value for money."
     },
-    "app_service": {
+    "App & Support": {
         "keywords": ["app", "refund", "cancel", "support"],
-        "action": "Improve app reliability, refund handling, and customer support."
+        "action": "Improve app reliability, refunds, and customer support response."
     }
 }
 
-# ---------------------------
-# Helper functions
-# ---------------------------
-def read_uploaded_file(uploaded_file):
-    ext = uploaded_file.name.split(".")[-1].lower()
+# ===============================
+# Helper Functions
+# ===============================
+def read_uploaded_file(file):
+    ext = file.name.split(".")[-1].lower()
 
     if ext == "txt":
-        return uploaded_file.read().decode("utf-8")
+        return file.read().decode("utf-8")
 
     if ext == "csv":
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(file)
         return " ".join(df.astype(str).values.flatten())
 
-    if ext in ["xlsx", "xls"]:
-        df = pd.read_excel(uploaded_file)
+    if ext in ["xls", "xlsx"]:
+        df = pd.read_excel(file)
         return " ".join(df.astype(str).values.flatten())
 
     if ext == "json":
-        data = json.load(uploaded_file)
-        return json.dumps(data)
+        return json.dumps(json.load(file))
 
     return ""
 
@@ -118,11 +139,10 @@ def detect_emotions(text):
     with torch.no_grad():
         logits = model(**inputs).logits
         probs = torch.sigmoid(logits).numpy()
-
-    dominant = [ID2LABEL[int(np.argmax(p))] for p in probs]
+    dominant = [EMOTION_LABELS[int(np.argmax(p))] for p in probs]
     return sentences, dominant
 
-def generate_recommendations(text, dominant_emotions):
+def generate_recommendations(text, emotions):
     text_l = text.lower()
     actions = set()
 
@@ -133,25 +153,26 @@ def generate_recommendations(text, dominant_emotions):
     if not actions:
         actions.add("Maintain current service quality. No major issues detected.")
 
-    emotion_summary = Counter(dominant_emotions)
+    return actions, Counter(emotions)
 
-    return actions, emotion_summary
-
-# ---------------------------
-# INPUT SECTION
-# ---------------------------
-st.header("📥 Upload Customer Feedback")
+# ===============================
+# UI — Input
+# ===============================
+st.header("📥 Upload or Paste Customer Feedback")
 
 uploaded_file = st.file_uploader(
     "Upload feedback file (TXT, CSV, XLSX, JSON)",
-    type=["txt", "csv", "xlsx", "xls", "json"]
+    type=["txt", "csv", "xls", "xlsx", "json"]
 )
 
 manual_text = st.text_area(
-    "Or paste feedback manually",
+    "Or paste feedback text here",
     height=200
 )
 
+# ===============================
+# Run Analysis
+# ===============================
 if st.button("Analyze Feedback"):
     if uploaded_file:
         feedback_text = read_uploaded_file(uploaded_file)
@@ -163,40 +184,40 @@ if st.button("Analyze Feedback"):
         st.stop()
 
     with st.spinner("Analyzing feedback..."):
-        sentences, dominant_emotions = detect_emotions(feedback_text)
-        actions, emotion_summary = generate_recommendations(
-            feedback_text, dominant_emotions
-        )
+        sentences, emotions = detect_emotions(feedback_text)
+        actions, emotion_summary = generate_recommendations(feedback_text, emotions)
 
-    # ---------------------------
-    # RESULTS
-    # ---------------------------
+    # ===============================
+    # Results
+    # ===============================
     st.success("Analysis Completed")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("📊 Emotion Overview")
+        st.subheader("📊 Emotion Summary")
         for emo, count in emotion_summary.items():
             st.write(f"**{emo.capitalize()}**: {count}")
 
     with col2:
-        st.subheader("🛠️ What You Should Improve")
+        st.subheader("🛠️ What Restaurant Owners Should Improve")
         for action in actions:
             st.success(action)
 
-    st.subheader("📝 Sample Sentence Insights")
-    for s, e in zip(sentences[:10], dominant_emotions[:10]):
+    st.subheader("📝 Example Feedback Insights")
+    for s, e in list(zip(sentences, emotions))[:10]:
         st.write(f"• *{s}* → **{e}**")
 
-    st.subheader("📍 Service Platforms (Saudi Arabia)")
-    map_df = pd.DataFrame({
-        "lat": [24.7136, 21.4858, 26.4207],
-        "lon": [46.6753, 39.1925, 50.0888],
-        "service": ["Marsool", "Talabat", "HungerStation"]
-    })
-    st.map(map_df)
+    # ===============================
+    # MAP SECTION (FIXED & VISIBLE)
+    # ===============================
+    st.subheader("📍 Major Food Delivery Services in Saudi Arabia")
+    st.map(RESTAURANTS)
 
+# ===============================
+# Footer
+# ===============================
 st.info(
-    "This system converts raw customer feedback into clear service improvement actions for restaurant owners."
+    "This system converts raw customer feedback into actionable service improvement "
+    "recommendations for restaurant owners and food delivery platforms."
 )
