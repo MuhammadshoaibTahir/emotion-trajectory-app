@@ -1,6 +1,6 @@
 # test.py
 """
-Restaurant Feedback Improvement System
+Restaurant Improvement System
 
 Developed by:
 - Muhammad Shoaib Tahir
