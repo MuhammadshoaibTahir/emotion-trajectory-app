@@ -1,48 +1,19 @@
-# Emotion Trajectory Analyzer (Streamlit App)
+Emotion Trajectory App
 
-A Streamlit-powered NLP tool that performs:
+A Streamlit-based application for fine-grained emotion and sentiment trajectory analysis of textual data. The app enables sentence-level emotion detection, visual emotion flow visualization, explainable emotion reasoning, and comparative emotional insights for research and applied analytics.
 
-✨ Sentence-level emotion analysis  
-✨ Word-level attention / heatmap  
-✨ 3D animated emotional trajectory  
-✨ Explainable zero-shot classification  
-✨ Emotion statistics dashboard  
-✨ Text similarity & embeddings  
+Key Features
 
-Built with:
-- Streamlit
-- HuggingFace Transformers
-- PyTorch
-- Plotly 3D Visualization
+* Sentence-level emotion detection
+* Emotion trajectory visualization
+* Explainable emotion reasoning
+* Emotion statistics dashboard
 
----
+Use Case
 
-## 🚀 Features
+“The Emotion Trajectory App is particularly useful for restaurant owners and service managers, as it enables them to systematically analyze customer feedback and identify emotional patterns linked to service quality. By visualizing how emotions evolve across user reviews, restaurant stakeholders can detect recurring sources of customer dissatisfaction such as delayed delivery, incorrect orders, or poor communication. These insights support data-driven decision-making and allow restaurants to improve operational processes, customer service strategies, and overall user satisfaction based on real customer feedback rather than isolated complaints.”
 
-### 🔹 Sentence Emotion Breakdown
-- Detects dominant emotion per sentence
-- Visual color-coded highlights
+Developed By
 
-### 🔹 3D Emotion Trajectory (Animated)
-- Generates motion path across 3D space
-- Visualizes emotional flow in text
-
-### 🔹 Zero-Shot Emotion Reasoning
-- “Why this emotion?” explanation using LLM
-
-### 🔹 Word-Importance Heatmap
-- Shows attention-based relevance of each word
-
-### 🔹 Compare Multiple Texts
-- Emotion drift distance
-- Similarity scores
-
----
-
-## 🛠 Installation
-
-```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd your-repo
-pip install -r requirements.txt
-streamlit run test.py
+* **Muhammad Shoaib Tahir** — Visiting Lecturer, COMSATS University Islamabad, Lahore Campus
+* **Prof. Haroon Nasser Abdullah Alsager** — Professor, College of Science and Humanity Studies, Al Kharj, Prince Sattam Bin Abdulaziz University
