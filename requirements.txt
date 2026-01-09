@@ -1,13 +1,7 @@
 streamlit
-numpy
-pandas
-nltk
 torch
 transformers
-plotly
-scipy
-sentencepiece
-protobuf
-scikit-learn
-matplotlib
-whisper-timestamped
+pandas
+numpy
+nltk
+openpyxl
