@@ -1,32 +1,39 @@
 # test.py
 """
-Restaurant Feedback Improvement System
+Restaurant Improvement System
+
 Developed by:
-- Muhammad Shoaib Tahir (COMSATS University Islamabad)
-- Prof. Haroon Nasser Abdullah Alsager (Prince Sattam Bin Abdulaziz University)
+- Muhammad Shoaib Tahir
+  Visiting Lecturer, COMSATS University Islamabad, Lahore Campus
+- Prof. Haroon Nasser Abdullah Alsager
+  Professor, College of Science and Humanity Studies,
+  Prince Sattam Bin Abdulaziz University, Al-Kharj
 
 Purpose:
-Turn customer feedback into clear, actionable service improvements
+Convert customer feedback into clear, actionable service improvement
+recommendations for restaurant owners and food delivery platforms.
 """
 
 # ===============================
 # Imports
 # ===============================
+import os
 import json
+from collections import Counter
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-from collections import Counter
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+import nltk
+from nltk.tokenize import sent_tokenize
+
 # ===============================
 # NLTK FIX (STREAMLIT CLOUD SAFE)
 # ===============================
-import os
-import nltk
-
 NLTK_DATA_DIR = "/home/appuser/nltk_data"
 os.makedirs(NLTK_DATA_DIR, exist_ok=True)
 nltk.data.path.append(NLTK_DATA_DIR)
@@ -44,9 +51,13 @@ def ensure_nltk():
 
 ensure_nltk()
 
+# ===============================
+# Torch Device (Explicit & Safe)
+# ===============================
+DEVICE = torch.device("cpu")
 
 # ===============================
-# Streamlit Config
+# Streamlit Page Config
 # ===============================
 st.set_page_config(
     page_title="Restaurant Feedback Improvement System",
@@ -55,11 +66,12 @@ st.set_page_config(
 
 st.title("🍽️ Restaurant Feedback Improvement System")
 st.caption(
-    "Transform customer feedback into actionable service improvements"
+    "Analyze customer feedback and receive precise, actionable "
+    "service improvement recommendations"
 )
 
 # ===============================
-# Model Loading
+# Load Emotion Model
 # ===============================
 MODEL_NAME = "joeddav/distilbert-base-uncased-go-emotions-student"
 
@@ -67,6 +79,7 @@ MODEL_NAME = "joeddav/distilbert-base-uncased-go-emotions-student"
 def load_model():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+    model.to(DEVICE)
     model.eval()
     labels = list(model.config.id2label.values())
     return tokenizer, model, labels
@@ -74,7 +87,7 @@ def load_model():
 tokenizer, model, EMOTION_LABELS = load_model()
 
 # ===============================
-# Restaurant Locations (MAP FIX)
+# Restaurant Locations (Map)
 # ===============================
 RESTAURANTS = pd.DataFrame({
     "restaurant": ["Marsool", "Talabat", "HungerStation"],
@@ -96,7 +109,7 @@ SERVICE_RULES = {
     },
     "Staff Behavior": {
         "keywords": ["rude", "staff", "behavior", "attitude"],
-        "action": "Train staff on customer handling and professional behavior."
+        "action": "Train staff on professional customer handling."
     },
     "Hygiene": {
         "keywords": ["dirty", "hygiene", "clean", "smell"],
@@ -108,7 +121,7 @@ SERVICE_RULES = {
     },
     "Pricing": {
         "keywords": ["price", "expensive", "cheap", "cost"],
-        "action": "Review pricing strategy and value for money."
+        "action": "Review pricing strategy and perceived value for money."
     },
     "App & Support": {
         "keywords": ["app", "refund", "cancel", "support"],
@@ -123,7 +136,7 @@ def read_uploaded_file(file):
     ext = file.name.split(".")[-1].lower()
 
     if ext == "txt":
-        return file.read().decode("utf-8")
+        return file.read().decode("utf-8", errors="ignore")
 
     if ext == "csv":
         df = pd.read_csv(file)
@@ -140,28 +153,44 @@ def read_uploaded_file(file):
 
 def detect_emotions(text):
     sentences = sent_tokenize(text)
-    inputs = tokenizer(sentences, padding=True, truncation=True, return_tensors="pt")
+
+    if not sentences:
+        return [], []
+
+    inputs = tokenizer(
+        sentences,
+        padding=True,
+        truncation=True,
+        return_tensors="pt"
+    ).to(DEVICE)
+
     with torch.no_grad():
         logits = model(**inputs).logits
-        probs = torch.sigmoid(logits).numpy()
-    dominant = [EMOTION_LABELS[int(np.argmax(p))] for p in probs]
-    return sentences, dominant
+        probs = torch.sigmoid(logits).cpu().numpy()
+
+    dominant_emotions = [
+        EMOTION_LABELS[int(np.argmax(p))] for p in probs
+    ]
+
+    return sentences, dominant_emotions
 
 def generate_recommendations(text, emotions):
-    text_l = text.lower()
+    text_lower = text.lower()
     actions = set()
 
     for rule in SERVICE_RULES.values():
-        if any(k in text_l for k in rule["keywords"]):
+        if any(keyword in text_lower for keyword in rule["keywords"]):
             actions.add(rule["action"])
 
     if not actions:
-        actions.add("Maintain current service quality. No major issues detected.")
+        actions.add(
+            "Maintain current service quality. No major issues detected."
+        )
 
     return actions, Counter(emotions)
 
 # ===============================
-# UI — Input
+# User Input Section
 # ===============================
 st.header("📥 Upload or Paste Customer Feedback")
 
@@ -171,8 +200,8 @@ uploaded_file = st.file_uploader(
 )
 
 manual_text = st.text_area(
-    "Or paste feedback text here",
-    height=200
+    "Or paste customer feedback here",
+    height=220
 )
 
 # ===============================
@@ -190,7 +219,9 @@ if st.button("Analyze Feedback"):
 
     with st.spinner("Analyzing feedback..."):
         sentences, emotions = detect_emotions(feedback_text)
-        actions, emotion_summary = generate_recommendations(feedback_text, emotions)
+        actions, emotion_summary = generate_recommendations(
+            feedback_text, emotions
+        )
 
     # ===============================
     # Results
@@ -201,20 +232,20 @@ if st.button("Analyze Feedback"):
 
     with col1:
         st.subheader("📊 Emotion Summary")
-        for emo, count in emotion_summary.items():
-            st.write(f"**{emo.capitalize()}**: {count}")
+        for emotion, count in emotion_summary.items():
+            st.write(f"**{emotion.capitalize()}**: {count}")
 
     with col2:
-        st.subheader("🛠️ What Restaurant Owners Should Improve")
+        st.subheader("🛠️ Actionable Recommendations for Owners")
         for action in actions:
             st.success(action)
 
-    st.subheader("📝 Example Feedback Insights")
+    st.subheader("📝 Sample Sentence-Level Insights")
     for s, e in list(zip(sentences, emotions))[:10]:
         st.write(f"• *{s}* → **{e}**")
 
     # ===============================
-    # MAP SECTION (FIXED & VISIBLE)
+    # Map Section
     # ===============================
     st.subheader("📍 Major Food Delivery Services in Saudi Arabia")
     st.map(RESTAURANTS)
@@ -223,6 +254,7 @@ if st.button("Analyze Feedback"):
 # Footer
 # ===============================
 st.info(
-    "This system converts raw customer feedback into actionable service improvement "
-    "recommendations for restaurant owners and food delivery platforms."
+    "This system supports restaurant owners and food delivery platforms "
+    "by transforming raw customer feedback into clear, data-driven "
+    "service improvement recommendations."
 )
