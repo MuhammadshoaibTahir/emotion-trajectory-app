@@ -18,27 +18,32 @@ import pandas as pd
 import numpy as np
 from collections import Counter
 
-import nltk
-from nltk.tokenize import sent_tokenize
-
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # ===============================
 # NLTK FIX (STREAMLIT CLOUD SAFE)
 # ===============================
+import os
+import nltk
+
+NLTK_DATA_DIR = "/home/appuser/nltk_data"
+os.makedirs(NLTK_DATA_DIR, exist_ok=True)
+nltk.data.path.append(NLTK_DATA_DIR)
+
 def ensure_nltk():
     try:
         nltk.data.find("tokenizers/punkt")
     except LookupError:
-        nltk.download("punkt")
+        nltk.download("punkt", download_dir=NLTK_DATA_DIR)
 
     try:
         nltk.data.find("tokenizers/punkt_tab")
     except LookupError:
-        nltk.download("punkt_tab")
+        nltk.download("punkt_tab", download_dir=NLTK_DATA_DIR)
 
 ensure_nltk()
+
 
 # ===============================
 # Streamlit Config
